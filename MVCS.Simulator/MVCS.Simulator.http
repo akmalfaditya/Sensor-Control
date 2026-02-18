@@ -1,0 +1,6 @@
+@MVCS.Simulator_HostAddress = http://localhost:5241
+
+GET {{MVCS.Simulator_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

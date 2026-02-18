@@ -1,0 +1,44 @@
+﻿@{
+    ViewData["Title"] = "Home";
+}
+
+<div class="min-h-screen flex flex-col items-center justify-center px-4">
+    <div class="text-center max-w-2xl">
+        <div class="mb-8">
+            <h1 class="text-5xl font-bold text-white mb-2">⚓ MVCS <span class="text-blue-500">Pro</span></h1>
+            <p class="text-slate-400 text-lg">Marine Vessel Control System</p>
+        </div>
+        <p class="text-slate-300 text-xl mb-8">
+            Real-time IoT monitoring and control system for marine vessels.
+            Manage compass navigation, water tanks, pumps, and deck lighting from a single dashboard.
+        </p>
+        <div class="flex flex-col sm:flex-row gap-4 justify-center">
+            <a asp-controller="Dashboard" asp-action="Index"
+               class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-8 rounded-lg transition-colors text-lg">
+                Open Dashboard
+            </a>
+            <a asp-controller="Account" asp-action="Login"
+               class="border border-slate-600 hover:border-slate-400 text-slate-300 hover:text-white font-semibold py-3 px-8 rounded-lg transition-colors text-lg">
+                Sign In
+            </a>
+        </div>
+        <div class="mt-16 grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+            <div class="bg-slate-800/50 rounded-lg p-4">
+                <div class="text-3xl mb-2">🧭</div>
+                <p class="text-slate-400 text-sm">Compass</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4">
+                <div class="text-3xl mb-2">💧</div>
+                <p class="text-slate-400 text-sm">Water Tank</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4">
+                <div class="text-3xl mb-2">⚙️</div>
+                <p class="text-slate-400 text-sm">Pump Control</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4">
+                <div class="text-3xl mb-2">💡</div>
+                <p class="text-slate-400 text-sm">Deck LED</p>
+            </div>
+        </div>
+    </div>
+</div>
