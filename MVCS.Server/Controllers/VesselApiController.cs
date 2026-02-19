@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MVCS.Server.Services;
 using MVCS.Shared.DTOs;
@@ -7,13 +8,14 @@ namespace MVCS.Server.Controllers;
 
 [ApiController]
 [Route("api/vessel")]
+[Authorize]
 public class VesselApiController : ControllerBase
 {
-    private readonly LogService _logService;
-    private readonly ServerHubClient _serverHubClient;
-    private readonly SimulatorConnectionService _simConn;
+    private readonly ILogService _logService;
+    private readonly IServerHubClient _serverHubClient;
+    private readonly ISimulatorConnectionService _simConn;
 
-    public VesselApiController(LogService logService, ServerHubClient serverHubClient, SimulatorConnectionService simConn)
+    public VesselApiController(ILogService logService, IServerHubClient serverHubClient, ISimulatorConnectionService simConn)
     {
         _logService = logService;
         _serverHubClient = serverHubClient;
@@ -89,38 +91,47 @@ public class VesselApiController : ControllerBase
         }
     }
 
-    // ---- History endpoints (read from local DB) ----
+    // ---- History endpoints (read from local DB, public access) ----
 
+    [AllowAnonymous]
     [HttpGet("history/water")]
-    public async Task<IActionResult> GetWaterHistory()
+    public async Task<IActionResult> GetWaterHistory(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null)
     {
-        var data = await _logService.GetWaterHistoryAsync();
+        var data = await _logService.GetWaterHistoryAsync(page, pageSize, from, to);
         return Ok(data);
     }
 
+    [AllowAnonymous]
     [HttpGet("history/pump")]
-    public async Task<IActionResult> GetPumpLogs()
+    public async Task<IActionResult> GetPumpLogs([FromQuery] int page = 1, [FromQuery] int pageSize = 50)
     {
-        var data = await _logService.GetPumpLogsAsync();
+        var data = await _logService.GetPumpLogsAsync(page, pageSize);
         return Ok(data);
     }
 
+    [AllowAnonymous]
     [HttpGet("history/compass")]
-    public async Task<IActionResult> GetCompassLogs()
+    public async Task<IActionResult> GetCompassLogs([FromQuery] int page = 1, [FromQuery] int pageSize = 50)
     {
-        var data = await _logService.GetCompassLogsAsync();
+        var data = await _logService.GetCompassLogsAsync(page, pageSize);
         return Ok(data);
     }
 
+    [AllowAnonymous]
     [HttpGet("history/led")]
-    public async Task<IActionResult> GetLedLogs()
+    public async Task<IActionResult> GetLedLogs([FromQuery] int page = 1, [FromQuery] int pageSize = 50)
     {
-        var data = await _logService.GetLedLogsAsync();
+        var data = await _logService.GetLedLogsAsync(page, pageSize);
         return Ok(data);
     }
 
     // ---- Simulator State ----
 
+    [AllowAnonymous]
     [HttpGet("simulator/state")]
     public async Task<IActionResult> GetSimulatorState()
     {

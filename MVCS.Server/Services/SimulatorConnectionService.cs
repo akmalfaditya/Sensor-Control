@@ -4,16 +4,31 @@ namespace MVCS.Server.Services;
 
 /// <summary>
 /// Tracks the Simulator's inbound SignalR connection to VesselHub (data stream).
-/// Used by VesselHub to detect connect/disconnect and cache last known state.
+/// Thread-safe — accessed from SignalR hub methods running on thread pool threads.
 /// </summary>
-public class SimulatorConnectionService
+public class SimulatorConnectionService : ISimulatorConnectionService
 {
+    private readonly object _lock = new();
+    private string? _simulatorConnectionId;
+    private SimulationStateDto? _lastKnownState;
+
     /// <summary>The SignalR connection ID of the simulator client, or null if disconnected.</summary>
-    public string? SimulatorConnectionId { get; set; }
+    public string? SimulatorConnectionId
+    {
+        get { lock (_lock) return _simulatorConnectionId; }
+        set { lock (_lock) _simulatorConnectionId = value; }
+    }
 
     /// <summary>Whether the simulator is currently pushing data to VesselHub.</summary>
-    public bool IsSimulatorConnected => SimulatorConnectionId != null;
+    public bool IsSimulatorConnected
+    {
+        get { lock (_lock) return _simulatorConnectionId != null; }
+    }
 
     /// <summary>Last known hardware state from the simulator.</summary>
-    public SimulationStateDto? LastKnownState { get; set; }
+    public SimulationStateDto? LastKnownState
+    {
+        get { lock (_lock) return _lastKnownState; }
+        set { lock (_lock) _lastKnownState = value; }
+    }
 }

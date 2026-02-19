@@ -10,12 +10,12 @@ namespace MVCS.Simulator.Controllers;
 [Route("api/hardware")]
 public class HardwareController : ControllerBase
 {
-    private readonly SimulationStateService _state;
-    private readonly SimulatorHubClient _hubClient;
+    private readonly ISimulationStateService _state;
+    private readonly ISimulatorHubClient _hubClient;
     private readonly IHubContext<SimulatorDashboardHub> _dashboardHub;
 
-    public HardwareController(SimulationStateService state,
-        SimulatorHubClient hubClient,
+    public HardwareController(ISimulationStateService state,
+        ISimulatorHubClient hubClient,
         IHubContext<SimulatorDashboardHub> dashboardHub)
     {
         _state = state;
@@ -42,17 +42,10 @@ public class HardwareController : ControllerBase
         if (!_state.State.IsWaterEnabled)
             return ServiceUnavailable("Water sensor is disabled");
 
-        var status = _state.WaterLevel switch
-        {
-            >= 80 => "HIGH",
-            >= 20 => "NORMAL",
-            _ => "LOW"
-        };
-
         return Ok(new WaterLevelDto
         {
             CurrentLevel = Math.Round(_state.WaterLevel, 1),
-            Status = status
+            Status = _state.GetWaterStatus()
         });
     }
 

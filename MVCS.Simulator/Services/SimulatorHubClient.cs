@@ -4,20 +4,23 @@ using MVCS.Shared.DTOs;
 namespace MVCS.Simulator.Services;
 
 /// <summary>
-/// Manages the outbound SignalR connection from Simulator to Server's VesselHub (port 5000).
+/// Manages the outbound SignalR connection from Simulator to Server's VesselHub.
 /// Used by workers & SimulatorHub to push sensor data and state updates to the dashboard.
 /// This is the "broadcaster" side — Simulator pushes data TO Server.
 /// </summary>
-public class SimulatorHubClient : IHostedService
+public class SimulatorHubClient : IHostedService, ISimulatorHubClient
 {
     private HubConnection? _hub;
-    private readonly SimulationStateService _state;
+    private readonly ISimulationStateService _state;
     private readonly ILogger<SimulatorHubClient> _logger;
+    private readonly string _serverHubUrl;
 
-    public SimulatorHubClient(SimulationStateService state, ILogger<SimulatorHubClient> logger)
+    public SimulatorHubClient(ISimulationStateService state, ILogger<SimulatorHubClient> logger, IConfiguration configuration)
     {
         _state = state;
         _logger = logger;
+        _serverHubUrl = configuration["SignalR:ServerHubUrl"]
+            ?? throw new InvalidOperationException("SignalR:ServerHubUrl is not configured in appsettings.json");
     }
 
     public bool IsConnected => _hub?.State == HubConnectionState.Connected;
@@ -25,8 +28,9 @@ public class SimulatorHubClient : IHostedService
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _hub = new HubConnectionBuilder()
-            .WithUrl("http://localhost:5000/vesselhub?role=simulator")
-            .WithAutomaticReconnect(new[] {
+            .WithUrl($"{_serverHubUrl}?role=simulator")
+            .WithAutomaticReconnect(new[]
+            {
                 TimeSpan.Zero,
                 TimeSpan.FromSeconds(2),
                 TimeSpan.FromSeconds(5),
@@ -67,53 +71,79 @@ public class SimulatorHubClient : IHostedService
             try
             {
                 await _hub!.StartAsync(ct);
-                _logger.LogInformation("Connected to Server SignalR hub at :5000");
+                _logger.LogInformation("Connected to Server SignalR hub at {Url}", _serverHubUrl);
                 await PushHardwareStateAsync();
                 return;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning("Failed to connect to Server hub: {Message}. Retrying in 3s...", ex.Message);
-                try { await Task.Delay(3000, ct); } catch (OperationCanceledException) { return; }
+                try { await Task.Delay(3000, ct); }
+                catch (OperationCanceledException) { return; }
             }
         }
     }
 
-    // ---- Push methods for workers / SimulatorHub ----
+    // ---- Push methods using SendAsync (fire-and-forget, more efficient) ----
 
     public async Task PushCompassAsync(int heading, string cardinal)
     {
-        if (!IsConnected) return;
-        try { await _hub!.InvokeAsync("SimPushCompass", heading, cardinal); }
-        catch (Exception ex) { _logger.LogWarning("Failed to push compass: {Message}", ex.Message); }
+        if (!IsConnected)
+        {
+            _logger.LogDebug("Skipping compass push — not connected to Server");
+            return;
+        }
+
+        try { await _hub!.SendAsync("SimPushCompass", heading, cardinal); }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to push compass data to Server hub"); }
     }
 
     public async Task PushWaterLevelAsync(double level, string status)
     {
-        if (!IsConnected) return;
-        try { await _hub!.InvokeAsync("SimPushWaterLevel", level, status); }
-        catch (Exception ex) { _logger.LogWarning("Failed to push water level: {Message}", ex.Message); }
+        if (!IsConnected)
+        {
+            _logger.LogDebug("Skipping water level push — not connected to Server");
+            return;
+        }
+
+        try { await _hub!.SendAsync("SimPushWaterLevel", level, status); }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to push water level data to Server hub"); }
     }
 
     public async Task PushHardwareStateAsync()
     {
-        if (!IsConnected) return;
-        try { await _hub!.InvokeAsync("SimPushHardwareState", _state.State); }
-        catch (Exception ex) { _logger.LogWarning("Failed to push hardware state: {Message}", ex.Message); }
+        if (!IsConnected)
+        {
+            _logger.LogDebug("Skipping hardware state push — not connected to Server");
+            return;
+        }
+
+        try { await _hub!.SendAsync("SimPushHardwareState", _state.GetStateSnapshot()); }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to push hardware state to Server hub"); }
     }
 
     public async Task PushPumpStateAsync(bool isOn, string message)
     {
-        if (!IsConnected) return;
-        try { await _hub!.InvokeAsync("SimPushPumpState", isOn, message); }
-        catch (Exception ex) { _logger.LogWarning("Failed to push pump state: {Message}", ex.Message); }
+        if (!IsConnected)
+        {
+            _logger.LogDebug("Skipping pump state push — not connected to Server");
+            return;
+        }
+
+        try { await _hub!.SendAsync("SimPushPumpState", isOn, message); }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to push pump state to Server hub"); }
     }
 
     public async Task PushLedStateAsync(string hexColor, int brightness)
     {
-        if (!IsConnected) return;
-        try { await _hub!.InvokeAsync("SimPushLedState", hexColor, brightness); }
-        catch (Exception ex) { _logger.LogWarning("Failed to push LED state: {Message}", ex.Message); }
+        if (!IsConnected)
+        {
+            _logger.LogDebug("Skipping LED state push — not connected to Server");
+            return;
+        }
+
+        try { await _hub!.SendAsync("SimPushLedState", hexColor, brightness); }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to push LED state to Server hub"); }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)

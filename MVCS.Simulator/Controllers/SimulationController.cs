@@ -10,12 +10,17 @@ namespace MVCS.Simulator.Controllers;
 [Route("api/simulation")]
 public class SimulationController : ControllerBase
 {
-    private readonly SimulationStateService _state;
-    private readonly SimulatorHubClient _hubClient;
+    private readonly ISimulationStateService _state;
+    private readonly ISimulatorHubClient _hubClient;
     private readonly IHubContext<SimulatorDashboardHub> _dashboardHub;
 
-    public SimulationController(SimulationStateService state,
-        SimulatorHubClient hubClient,
+    private static readonly HashSet<string> ValidComponents = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "compass", "water", "pump", "led"
+    };
+
+    public SimulationController(ISimulationStateService state,
+        ISimulatorHubClient hubClient,
         IHubContext<SimulatorDashboardHub> dashboardHub)
     {
         _state = state;
@@ -26,43 +31,21 @@ public class SimulationController : ControllerBase
     [HttpGet("state")]
     public ActionResult<SimulationStateDto> GetState()
     {
-        return Ok(_state.State);
+        return Ok(_state.GetStateSnapshot());
     }
 
-    [HttpPost("toggle/compass")]
-    public async Task<IActionResult> ToggleCompass()
+    /// <summary>Consolidated toggle endpoint — replaces 4 individual toggle methods.</summary>
+    [HttpPost("toggle/{component}")]
+    public async Task<IActionResult> Toggle(string component)
     {
-        _state.Toggle("compass");
-        await _hubClient.PushHardwareStateAsync();
-        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.State);
-        return Ok(new { component = "compass", enabled = _state.State.IsCompassEnabled });
-    }
+        if (!ValidComponents.Contains(component))
+            return BadRequest(new { error = $"Invalid component: {component}" });
 
-    [HttpPost("toggle/water")]
-    public async Task<IActionResult> ToggleWater()
-    {
-        _state.Toggle("water");
+        _state.Toggle(component);
         await _hubClient.PushHardwareStateAsync();
-        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.State);
-        return Ok(new { component = "water", enabled = _state.State.IsWaterEnabled });
-    }
+        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.GetStateSnapshot());
 
-    [HttpPost("toggle/pump")]
-    public async Task<IActionResult> TogglePump()
-    {
-        _state.Toggle("pump");
-        await _hubClient.PushHardwareStateAsync();
-        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.State);
-        return Ok(new { component = "pump", enabled = _state.State.IsPumpEnabled });
-    }
-
-    [HttpPost("toggle/led")]
-    public async Task<IActionResult> ToggleLed()
-    {
-        _state.Toggle("led");
-        await _hubClient.PushHardwareStateAsync();
-        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.State);
-        return Ok(new { component = "led", enabled = _state.State.IsLedEnabled });
+        return Ok(new { component, enabled = _state.GetComponentEnabled(component) });
     }
 
     [HttpPost("interval/{component}")]
@@ -70,7 +53,7 @@ public class SimulationController : ControllerBase
     {
         _state.SetInterval(component, request.IntervalMs);
         await _hubClient.PushHardwareStateAsync();
-        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.State);
+        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.GetStateSnapshot());
         return Ok(new
         {
             component,

@@ -5,19 +5,19 @@ using MVCS.Simulator.Services;
 namespace MVCS.Simulator.Hubs;
 
 /// <summary>
-/// SignalR hub hosted on the Simulator (port 5100).
+/// SignalR hub hosted on the Simulator.
 /// The Server connects here as a client to send commands.
 /// Hub methods return values directly — no correlation IDs needed.
 /// Also broadcasts state changes to the local dashboard via SimulatorDashboardHub.
 /// </summary>
 public class SimulatorHub : Hub
 {
-    private readonly SimulationStateService _state;
-    private readonly SimulatorHubClient _hubClient;
+    private readonly ISimulationStateService _state;
+    private readonly ISimulatorHubClient _hubClient;
     private readonly IHubContext<SimulatorDashboardHub> _dashboardHub;
     private readonly ILogger<SimulatorHub> _logger;
 
-    public SimulatorHub(SimulationStateService state, SimulatorHubClient hubClient,
+    public SimulatorHub(ISimulationStateService state, ISimulatorHubClient hubClient,
         IHubContext<SimulatorDashboardHub> dashboardHub, ILogger<SimulatorHub> logger)
     {
         _state = state;
@@ -97,14 +97,15 @@ public class SimulatorHub : Hub
         await _hubClient.PushHardwareStateAsync();
 
         // Push to local dashboard
-        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.State);
+        var snapshot = _state.GetStateSnapshot();
+        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", snapshot);
 
-        return _state.State;
+        return snapshot;
     }
 
     /// <summary>Server requests current simulation state.</summary>
     public SimulationStateDto RequestState()
     {
-        return _state.State;
+        return _state.GetStateSnapshot();
     }
 }

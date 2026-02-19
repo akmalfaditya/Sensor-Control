@@ -6,14 +6,14 @@ namespace MVCS.Simulator.Workers;
 
 public class CompassBroadcaster : BackgroundService
 {
-    private readonly SimulationStateService _state;
-    private readonly SimulatorHubClient _hubClient;
+    private readonly ISimulationStateService _state;
+    private readonly ISimulatorHubClient _hubClient;
     private readonly IHubContext<SimulatorDashboardHub> _dashboardHub;
     private readonly ILogger<CompassBroadcaster> _logger;
     private readonly Random _random = new();
 
-    public CompassBroadcaster(SimulationStateService state,
-        SimulatorHubClient hubClient,
+    public CompassBroadcaster(ISimulationStateService state,
+        ISimulatorHubClient hubClient,
         IHubContext<SimulatorDashboardHub> dashboardHub,
         ILogger<CompassBroadcaster> logger)
     {
@@ -25,7 +25,7 @@ public class CompassBroadcaster : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("CompassBroadcaster started.");
+        _logger.LogInformation("CompassBroadcaster started");
 
         while (!stoppingToken.IsCancellationRequested)
         {

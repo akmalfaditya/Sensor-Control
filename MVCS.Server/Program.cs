@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using MVCS.Server.Data;
 using MVCS.Server.Hubs;
@@ -6,16 +7,14 @@ using MVCS.Server.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure Kestrel for HTTP on port 5000
-builder.WebHost.UseUrls("http://localhost:5000");
-
 // Add services
 builder.Services.AddControllersWithViews();
 builder.Services.AddSignalR();
 
-// SQLite + Identity
+// SQLite + Identity (connection string from config)
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseSqlite("Data Source=mvcs.db"));
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is not configured")));
 
 builder.Services.AddDefaultIdentity<IdentityUser>(options =>
 {
@@ -34,13 +33,24 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.AccessDeniedPath = "/Account/Login";
 });
 
-// Business services
-builder.Services.AddScoped<LogService>();
-builder.Services.AddSingleton<SimulatorConnectionService>();
+// Business services (registered via interfaces)
+builder.Services.AddSingleton<LogService>();
+builder.Services.AddSingleton<ILogService>(sp => sp.GetRequiredService<LogService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<LogService>());
+
+builder.Services.AddSingleton<ISimulatorConnectionService, SimulatorConnectionService>();
 
 // Outbound SignalR client to Simulator's hub (for sending commands)
 builder.Services.AddSingleton<ServerHubClient>();
-builder.Services.AddHostedService<ServerHubClient>(sp => sp.GetRequiredService<ServerHubClient>());
+builder.Services.AddSingleton<IServerHubClient>(sp => sp.GetRequiredService<ServerHubClient>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerHubClient>());
+
+// Data retention background service
+builder.Services.AddHostedService<DataRetentionService>();
+
+// Health checks
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<ApplicationDbContext>("database");
 
 var app = builder.Build();
 
@@ -50,10 +60,10 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     db.Database.Migrate();
 
-    // Seed admin user
+    // Seed admin user (credentials from config)
     var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
-    const string adminEmail = "admin@mvcs.com";
-    const string adminPassword = "Admin123";
+    var adminEmail = builder.Configuration["SeedAdmin:Email"] ?? "admin@mvcs.com";
+    var adminPassword = builder.Configuration["SeedAdmin:Password"] ?? "Admin123";
 
     if (await userManager.FindByEmailAsync(adminEmail) == null)
     {
@@ -67,10 +77,21 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-if (!app.Environment.IsDevelopment())
+// Global exception handling
+app.UseExceptionHandler(errorApp =>
 {
-    app.UseExceptionHandler("/Home/Error");
-}
+    errorApp.Run(async context =>
+    {
+        var exceptionFeature = context.Features.Get<IExceptionHandlerPathFeature>();
+        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+        logger.LogError(exceptionFeature?.Error,
+            "Unhandled exception at {Path}", exceptionFeature?.Path);
+
+        context.Response.StatusCode = 500;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsJsonAsync(new { error = "Internal server error" });
+    });
+});
 
 app.UseStaticFiles();
 app.UseRouting();
@@ -83,5 +104,6 @@ app.MapControllerRoute(
     pattern: "{controller=Home}/{action=Index}/{id?}");
 
 app.MapHub<VesselHub>("/vesselhub");
+app.MapHealthChecks("/health");
 
 app.Run();

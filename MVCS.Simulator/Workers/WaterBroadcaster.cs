@@ -6,14 +6,14 @@ namespace MVCS.Simulator.Workers;
 
 public class WaterBroadcaster : BackgroundService
 {
-    private readonly SimulationStateService _state;
-    private readonly SimulatorHubClient _hubClient;
+    private readonly ISimulationStateService _state;
+    private readonly ISimulatorHubClient _hubClient;
     private readonly IHubContext<SimulatorDashboardHub> _dashboardHub;
     private readonly ILogger<WaterBroadcaster> _logger;
     private readonly Random _random = new();
 
-    public WaterBroadcaster(SimulationStateService state,
-        SimulatorHubClient hubClient,
+    public WaterBroadcaster(ISimulationStateService state,
+        ISimulatorHubClient hubClient,
         IHubContext<SimulatorDashboardHub> dashboardHub,
         ILogger<WaterBroadcaster> logger)
     {
@@ -25,7 +25,7 @@ public class WaterBroadcaster : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("WaterBroadcaster started.");
+        _logger.LogInformation("WaterBroadcaster started");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -59,13 +59,7 @@ public class WaterBroadcaster : BackgroundService
                     _state.WaterLevel = Math.Max(0, _state.WaterLevel - 2.0);
                 }
 
-                var status = _state.WaterLevel switch
-                {
-                    >= 80 => "HIGH",
-                    >= 20 => "NORMAL",
-                    _ => "LOW"
-                };
-
+                var status = _state.GetWaterStatus();
                 var level = Math.Round(_state.WaterLevel, 1);
 
                 // Push to Server
