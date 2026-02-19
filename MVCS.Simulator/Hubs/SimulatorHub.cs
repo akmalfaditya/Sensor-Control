@@ -8,17 +8,21 @@ namespace MVCS.Simulator.Hubs;
 /// SignalR hub hosted on the Simulator (port 5100).
 /// The Server connects here as a client to send commands.
 /// Hub methods return values directly — no correlation IDs needed.
+/// Also broadcasts state changes to the local dashboard via SimulatorDashboardHub.
 /// </summary>
 public class SimulatorHub : Hub
 {
     private readonly SimulationStateService _state;
     private readonly SimulatorHubClient _hubClient;
+    private readonly IHubContext<SimulatorDashboardHub> _dashboardHub;
     private readonly ILogger<SimulatorHub> _logger;
 
-    public SimulatorHub(SimulationStateService state, SimulatorHubClient hubClient, ILogger<SimulatorHub> logger)
+    public SimulatorHub(SimulationStateService state, SimulatorHubClient hubClient,
+        IHubContext<SimulatorDashboardHub> dashboardHub, ILogger<SimulatorHub> logger)
     {
         _state = state;
         _hubClient = hubClient;
+        _dashboardHub = dashboardHub;
         _logger = logger;
     }
 
@@ -52,6 +56,9 @@ public class SimulatorHub : Hub
         // Broadcast pump state to Server's dashboard via our outbound connection
         await _hubClient.PushPumpStateAsync(result.IsOn, result.Message);
 
+        // Broadcast to local dashboard
+        await _dashboardHub.Clients.All.SendAsync("ReceivePumpState", result.IsOn, result.Message);
+
         _logger.LogInformation("Pump command executed: IsOn={IsOn}", result.IsOn);
         return result;
     }
@@ -73,6 +80,9 @@ public class SimulatorHub : Hub
         // Broadcast LED state to Server's dashboard via our outbound connection
         await _hubClient.PushLedStateAsync(result.HexColor, result.Brightness);
 
+        // Broadcast to local dashboard
+        await _dashboardHub.Clients.All.SendAsync("ReceiveLedState", result.HexColor, result.Brightness);
+
         _logger.LogInformation("LED command executed: Color={Color}, Brightness={Brightness}", result.HexColor, result.Brightness);
         return result;
     }
@@ -85,6 +95,9 @@ public class SimulatorHub : Hub
 
         // Push updated state to Server's dashboard
         await _hubClient.PushHardwareStateAsync();
+
+        // Push to local dashboard
+        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.State);
 
         return _state.State;
     }

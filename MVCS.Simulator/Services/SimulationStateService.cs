@@ -23,6 +23,35 @@ public class SimulationStateService
     public string LedHexColor { get; set; } = "#000000";
     public int LedBrightness { get; set; } = 100;
 
+    // Broadcast intervals (ms)
+    public int CompassIntervalMs
+    {
+        get => State.CompassIntervalMs;
+        set => State.CompassIntervalMs = Math.Clamp(value, 100, 10000);
+    }
+
+    public int WaterIntervalMs
+    {
+        get => State.WaterIntervalMs;
+        set => State.WaterIntervalMs = Math.Clamp(value, 100, 10000);
+    }
+
+    public void SetInterval(string component, int intervalMs)
+    {
+        lock (_lock)
+        {
+            switch (component.ToLower())
+            {
+                case "compass":
+                    CompassIntervalMs = intervalMs;
+                    break;
+                case "water":
+                    WaterIntervalMs = intervalMs;
+                    break;
+            }
+        }
+    }
+
     public void Toggle(string component)
     {
         lock (_lock)

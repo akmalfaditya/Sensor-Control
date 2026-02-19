@@ -1,0 +1,54 @@
+@{
+    ViewData["Title"] = "Home";
+}
+
+<div class="min-h-screen flex flex-col items-center justify-center px-4">
+    <div class="text-center max-w-2xl">
+        <div class="mb-8">
+            <h1 class="text-5xl font-bold text-white mb-2">🔧 MVCS <span class="text-orange-500">Simulator</span></h1>
+            <p class="text-slate-400 text-lg">Hardware Simulation Engine</p>
+        </div>
+        <p class="text-slate-300 text-xl mb-8">
+            Simulates marine vessel hardware components — compass, water tank, pump, and deck LED.
+            Control hardware state, set broadcast intervals, and monitor real-time data.
+        </p>
+        <div class="flex flex-col sm:flex-row gap-4 justify-center">
+            <a href="/Dashboard"
+               class="bg-orange-600 hover:bg-orange-700 text-white font-semibold py-3 px-8 rounded-lg transition-colors text-lg shadow-lg shadow-orange-500/20 hover:shadow-orange-500/40">
+                Open Simulator Dashboard
+            </a>
+            <a href="/swagger"
+               class="border border-slate-600 hover:border-slate-400 text-slate-300 hover:text-white font-semibold py-3 px-8 rounded-lg transition-colors text-lg">
+                API Docs
+            </a>
+        </div>
+        <div class="mt-16 grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
+                <div class="text-3xl mb-2">🧭</div>
+                <p class="text-slate-400 text-sm">Compass</p>
+                <p class="text-cyan-400 text-xs mt-1 font-mono">500ms</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
+                <div class="text-3xl mb-2">💧</div>
+                <p class="text-slate-400 text-sm">Water Tank</p>
+                <p class="text-blue-400 text-xs mt-1 font-mono">2000ms</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
+                <div class="text-3xl mb-2">⚙️</div>
+                <p class="text-slate-400 text-sm">Pump Control</p>
+                <p class="text-emerald-400 text-xs mt-1 font-mono">On/Off</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
+                <div class="text-3xl mb-2">💡</div>
+                <p class="text-slate-400 text-sm">Deck LED</p>
+                <p class="text-amber-400 text-xs mt-1 font-mono">RGB</p>
+            </div>
+        </div>
+        <div class="mt-8">
+            <div class="inline-flex items-center gap-2 bg-slate-800/60 rounded-lg px-4 py-2 border border-slate-700/50">
+                <div class="w-2 h-2 rounded-full bg-orange-400 animate-pulse"></div>
+                <span class="text-slate-400 text-sm">Port <span class="text-orange-400 font-mono font-bold">5100</span> · Simulator Mode</span>
+            </div>
+        </div>
+    </div>
+</div>

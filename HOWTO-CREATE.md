@@ -144,6 +144,8 @@ public class SimulationStateDto
     public bool IsWaterEnabled { get; set; } = true;
     public bool IsPumpEnabled { get; set; } = true;
     public bool IsLedEnabled { get; set; } = true;
+    public int CompassIntervalMs { get; set; } = 500;
+    public int WaterIntervalMs { get; set; } = 2000;
 }
 ```
 
@@ -170,12 +172,42 @@ public class SimulationStateService
         IsLedEnabled = true
     };
 
+    // Current sensor/actuator values
     public int CompassHeading { get; set; } = 0;
     public double WaterLevel { get; set; } = 50.0;
     public bool WaterRising { get; set; } = true;
     public bool PumpIsOn { get; set; } = false;
     public string LedHexColor { get; set; } = "#000000";
     public int LedBrightness { get; set; } = 100;
+
+    // Broadcast intervals (ms)
+    public int CompassIntervalMs
+    {
+        get => State.CompassIntervalMs;
+        set => State.CompassIntervalMs = Math.Clamp(value, 100, 10000);
+    }
+
+    public int WaterIntervalMs
+    {
+        get => State.WaterIntervalMs;
+        set => State.WaterIntervalMs = Math.Clamp(value, 100, 10000);
+    }
+
+    public void SetInterval(string component, int intervalMs)
+    {
+        lock (_lock)
+        {
+            switch (component.ToLower())
+            {
+                case "compass":
+                    CompassIntervalMs = intervalMs;
+                    break;
+                case "water":
+                    WaterIntervalMs = intervalMs;
+                    break;
+            }
+        }
+    }
 
     public void Toggle(string component)
     {
@@ -349,19 +381,24 @@ using MVCS.Simulator.Services;
 namespace MVCS.Simulator.Hubs;
 
 /// <summary>
-/// Inbound SignalR hub: Server connects here to send commands.
+/// SignalR hub hosted on the Simulator (port 5100).
+/// The Server connects here as a client to send commands.
 /// Hub methods return values directly — no correlation IDs needed.
+/// Also broadcasts state changes to the local dashboard via SimulatorDashboardHub.
 /// </summary>
 public class SimulatorHub : Hub
 {
     private readonly SimulationStateService _state;
     private readonly SimulatorHubClient _hubClient;
+    private readonly IHubContext<SimulatorDashboardHub> _dashboardHub;
     private readonly ILogger<SimulatorHub> _logger;
 
-    public SimulatorHub(SimulationStateService state, SimulatorHubClient hubClient, ILogger<SimulatorHub> logger)
+    public SimulatorHub(SimulationStateService state, SimulatorHubClient hubClient,
+        IHubContext<SimulatorDashboardHub> dashboardHub, ILogger<SimulatorHub> logger)
     {
         _state = state;
         _hubClient = hubClient;
+        _dashboardHub = dashboardHub;
         _logger = logger;
     }
 
@@ -377,6 +414,9 @@ public class SimulatorHub : Hub
         await base.OnDisconnectedAsync(exception);
     }
 
+    // ---- Commands from Server ----
+
+    /// <summary>Server commands the pump on/off. Returns PumpStateDto or error.</summary>
     public async Task<object> ExecutePumpCommand(bool isOn, string message)
     {
         if (!_state.State.IsPumpEnabled)
@@ -389,11 +429,17 @@ public class SimulatorHub : Hub
             Message = _state.PumpIsOn ? "Pump activated" : "Pump deactivated"
         };
 
+        // Broadcast pump state to Server's dashboard via our outbound connection
         await _hubClient.PushPumpStateAsync(result.IsOn, result.Message);
+
+        // Broadcast to local dashboard
+        await _dashboardHub.Clients.All.SendAsync("ReceivePumpState", result.IsOn, result.Message);
+
         _logger.LogInformation("Pump command executed: IsOn={IsOn}", result.IsOn);
         return result;
     }
 
+    /// <summary>Server commands the LED color/brightness. Returns LedStateDto or error.</summary>
     public async Task<object> ExecuteLedCommand(string hexColor, int brightness)
     {
         if (!_state.State.IsLedEnabled)
@@ -407,19 +453,32 @@ public class SimulatorHub : Hub
             Brightness = _state.LedBrightness
         };
 
+        // Broadcast LED state to Server's dashboard via our outbound connection
         await _hubClient.PushLedStateAsync(result.HexColor, result.Brightness);
+
+        // Broadcast to local dashboard
+        await _dashboardHub.Clients.All.SendAsync("ReceiveLedState", result.HexColor, result.Brightness);
+
         _logger.LogInformation("LED command executed: Color={Color}, Brightness={Brightness}", result.HexColor, result.Brightness);
         return result;
     }
 
+    /// <summary>Server asks to toggle a hardware component.</summary>
     public async Task<SimulationStateDto> ToggleHardware(string component)
     {
         _state.Toggle(component);
         _logger.LogInformation("Hardware toggled: {Component}", component);
+
+        // Push updated state to Server's dashboard
         await _hubClient.PushHardwareStateAsync();
+
+        // Push to local dashboard
+        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.State);
+
         return _state.State;
     }
 
+    /// <summary>Server requests current simulation state.</summary>
     public SimulationStateDto RequestState()
     {
         return _state.State;
@@ -427,8 +486,66 @@ public class SimulatorHub : Hub
 }
 ```
 
+### `MVCS.Simulator/Hubs/SimulatorDashboardHub.cs`
+
+> **BARU:** Hub ini khusus untuk browser lokal Simulator. Pisah dari `SimulatorHub` yang menangani koneksi Server.
+
+```csharp
+using Microsoft.AspNetCore.SignalR;
+using MVCS.Simulator.Services;
+
+namespace MVCS.Simulator.Hubs;
+
+/// <summary>
+/// Local SignalR hub for browser clients connecting to the Simulator dashboard UI.
+/// Separate from SimulatorHub which handles Server-to-Simulator commands.
+/// </summary>
+public class SimulatorDashboardHub : Hub
+{
+    private readonly SimulationStateService _state;
+    private readonly ILogger<SimulatorDashboardHub> _logger;
+
+    public SimulatorDashboardHub(SimulationStateService state, ILogger<SimulatorDashboardHub> logger)
+    {
+        _state = state;
+        _logger = logger;
+    }
+
+    public override async Task OnConnectedAsync()
+    {
+        _logger.LogInformation("Dashboard browser connected: {ConnectionId}", Context.ConnectionId);
+
+        // Send current state immediately to new client
+        await Clients.Caller.SendAsync("ReceiveHardwareState", _state.State);
+        await Clients.Caller.SendAsync("ReceiveCompass", _state.CompassHeading,
+            _state.GetCardinalDirection(_state.CompassHeading));
+        await Clients.Caller.SendAsync("ReceivePumpState", _state.PumpIsOn,
+            _state.PumpIsOn ? "Pump is running" : "Pump is idle");
+        await Clients.Caller.SendAsync("ReceiveLedState", _state.LedHexColor, _state.LedBrightness);
+
+        var waterStatus = _state.WaterLevel switch
+        {
+            >= 80 => "HIGH",
+            >= 20 => "NORMAL",
+            _ => "LOW"
+        };
+        await Clients.Caller.SendAsync("ReceiveWaterLevel", Math.Round(_state.WaterLevel, 1), waterStatus);
+
+        await base.OnConnectedAsync();
+    }
+
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        _logger.LogInformation("Dashboard browser disconnected: {ConnectionId}", Context.ConnectionId);
+        await base.OnDisconnectedAsync(exception);
+    }
+}
+```
+
 ### `MVCS.Simulator/Workers/CompassBroadcaster.cs`
 ```csharp
+using Microsoft.AspNetCore.SignalR;
+using MVCS.Simulator.Hubs;
 using MVCS.Simulator.Services;
 
 namespace MVCS.Simulator.Workers;
@@ -437,15 +554,18 @@ public class CompassBroadcaster : BackgroundService
 {
     private readonly SimulationStateService _state;
     private readonly SimulatorHubClient _hubClient;
+    private readonly IHubContext<SimulatorDashboardHub> _dashboardHub;
     private readonly ILogger<CompassBroadcaster> _logger;
     private readonly Random _random = new();
 
     public CompassBroadcaster(SimulationStateService state,
         SimulatorHubClient hubClient,
+        IHubContext<SimulatorDashboardHub> dashboardHub,
         ILogger<CompassBroadcaster> logger)
     {
         _state = state;
         _hubClient = hubClient;
+        _dashboardHub = dashboardHub;
         _logger = logger;
     }
 
@@ -457,14 +577,20 @@ public class CompassBroadcaster : BackgroundService
         {
             if (_state.State.IsGlobalRunning && _state.State.IsCompassEnabled)
             {
+                // Simulate compass heading drift
                 var drift = _random.Next(-5, 6);
                 _state.CompassHeading = (_state.CompassHeading + drift + 360) % 360;
                 var cardinal = _state.GetCardinalDirection(_state.CompassHeading);
 
+                // Push to Server
                 await _hubClient.PushCompassAsync(_state.CompassHeading, cardinal);
+
+                // Push to local dashboard
+                await _dashboardHub.Clients.All.SendAsync("ReceiveCompass",
+                    _state.CompassHeading, cardinal, stoppingToken);
             }
 
-            await Task.Delay(500, stoppingToken);
+            await Task.Delay(_state.CompassIntervalMs, stoppingToken);
         }
     }
 }
@@ -472,6 +598,8 @@ public class CompassBroadcaster : BackgroundService
 
 ### `MVCS.Simulator/Workers/WaterBroadcaster.cs`
 ```csharp
+using Microsoft.AspNetCore.SignalR;
+using MVCS.Simulator.Hubs;
 using MVCS.Simulator.Services;
 
 namespace MVCS.Simulator.Workers;
@@ -480,15 +608,18 @@ public class WaterBroadcaster : BackgroundService
 {
     private readonly SimulationStateService _state;
     private readonly SimulatorHubClient _hubClient;
+    private readonly IHubContext<SimulatorDashboardHub> _dashboardHub;
     private readonly ILogger<WaterBroadcaster> _logger;
     private readonly Random _random = new();
 
     public WaterBroadcaster(SimulationStateService state,
         SimulatorHubClient hubClient,
+        IHubContext<SimulatorDashboardHub> dashboardHub,
         ILogger<WaterBroadcaster> logger)
     {
         _state = state;
         _hubClient = hubClient;
+        _dashboardHub = dashboardHub;
         _logger = logger;
     }
 
@@ -500,6 +631,7 @@ public class WaterBroadcaster : BackgroundService
         {
             if (_state.State.IsGlobalRunning && _state.State.IsWaterEnabled)
             {
+                // Simulate water level rising/falling
                 var change = _random.NextDouble() * 3.0;
 
                 if (_state.WaterRising)
@@ -521,6 +653,7 @@ public class WaterBroadcaster : BackgroundService
                     }
                 }
 
+                // If pump is on, drain faster
                 if (_state.PumpIsOn)
                 {
                     _state.WaterLevel = Math.Max(0, _state.WaterLevel - 2.0);
@@ -533,10 +666,17 @@ public class WaterBroadcaster : BackgroundService
                     _ => "LOW"
                 };
 
-                await _hubClient.PushWaterLevelAsync(Math.Round(_state.WaterLevel, 1), status);
+                var level = Math.Round(_state.WaterLevel, 1);
+
+                // Push to Server
+                await _hubClient.PushWaterLevelAsync(level, status);
+
+                // Push to local dashboard
+                await _dashboardHub.Clients.All.SendAsync("ReceiveWaterLevel",
+                    level, status, stoppingToken);
             }
 
-            await Task.Delay(2000, stoppingToken);
+            await Task.Delay(_state.WaterIntervalMs, stoppingToken);
         }
     }
 }
@@ -545,7 +685,9 @@ public class WaterBroadcaster : BackgroundService
 ### `MVCS.Simulator/Controllers/HardwareController.cs`
 ```csharp
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using MVCS.Shared.DTOs;
+using MVCS.Simulator.Hubs;
 using MVCS.Simulator.Services;
 
 namespace MVCS.Simulator.Controllers;
@@ -555,10 +697,16 @@ namespace MVCS.Simulator.Controllers;
 public class HardwareController : ControllerBase
 {
     private readonly SimulationStateService _state;
+    private readonly SimulatorHubClient _hubClient;
+    private readonly IHubContext<SimulatorDashboardHub> _dashboardHub;
 
-    public HardwareController(SimulationStateService state)
+    public HardwareController(SimulationStateService state,
+        SimulatorHubClient hubClient,
+        IHubContext<SimulatorDashboardHub> dashboardHub)
     {
         _state = state;
+        _hubClient = hubClient;
+        _dashboardHub = dashboardHub;
     }
 
     [HttpGet("compass")]
@@ -595,32 +743,48 @@ public class HardwareController : ControllerBase
     }
 
     [HttpPost("pump")]
-    public ActionResult<PumpStateDto> SetPump([FromBody] PumpStateDto dto)
+    public async Task<ActionResult<PumpStateDto>> SetPump([FromBody] PumpStateDto dto)
     {
         if (!_state.State.IsPumpEnabled)
             return ServiceUnavailable("Pump is disabled");
 
         _state.PumpIsOn = dto.IsOn;
-        return Ok(new PumpStateDto
+        var result = new PumpStateDto
         {
             IsOn = _state.PumpIsOn,
             Message = _state.PumpIsOn ? "Pump activated" : "Pump deactivated"
-        });
+        };
+
+        // Broadcast to Server via SignalR
+        await _hubClient.PushPumpStateAsync(result.IsOn, result.Message);
+
+        // Broadcast to local dashboard
+        await _dashboardHub.Clients.All.SendAsync("ReceivePumpState", result.IsOn, result.Message);
+
+        return Ok(result);
     }
 
     [HttpPost("led")]
-    public ActionResult<LedStateDto> SetLed([FromBody] LedStateDto dto)
+    public async Task<ActionResult<LedStateDto>> SetLed([FromBody] LedStateDto dto)
     {
         if (!_state.State.IsLedEnabled)
             return ServiceUnavailable("LED is disabled");
 
         _state.LedHexColor = dto.HexColor;
         _state.LedBrightness = dto.Brightness;
-        return Ok(new LedStateDto
+        var result = new LedStateDto
         {
             HexColor = _state.LedHexColor,
             Brightness = _state.LedBrightness
-        });
+        };
+
+        // Broadcast to Server via SignalR
+        await _hubClient.PushLedStateAsync(result.HexColor, result.Brightness);
+
+        // Broadcast to local dashboard
+        await _dashboardHub.Clients.All.SendAsync("ReceiveLedState", result.HexColor, result.Brightness);
+
+        return Ok(result);
     }
 
     private ObjectResult ServiceUnavailable(string message)
@@ -633,7 +797,9 @@ public class HardwareController : ControllerBase
 ### `MVCS.Simulator/Controllers/SimulationController.cs`
 ```csharp
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using MVCS.Shared.DTOs;
+using MVCS.Simulator.Hubs;
 using MVCS.Simulator.Services;
 
 namespace MVCS.Simulator.Controllers;
@@ -644,11 +810,15 @@ public class SimulationController : ControllerBase
 {
     private readonly SimulationStateService _state;
     private readonly SimulatorHubClient _hubClient;
+    private readonly IHubContext<SimulatorDashboardHub> _dashboardHub;
 
-    public SimulationController(SimulationStateService state, SimulatorHubClient hubClient)
+    public SimulationController(SimulationStateService state,
+        SimulatorHubClient hubClient,
+        IHubContext<SimulatorDashboardHub> dashboardHub)
     {
         _state = state;
         _hubClient = hubClient;
+        _dashboardHub = dashboardHub;
     }
 
     [HttpGet("state")]
@@ -662,6 +832,7 @@ public class SimulationController : ControllerBase
     {
         _state.Toggle("compass");
         await _hubClient.PushHardwareStateAsync();
+        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.State);
         return Ok(new { component = "compass", enabled = _state.State.IsCompassEnabled });
     }
 
@@ -670,6 +841,7 @@ public class SimulationController : ControllerBase
     {
         _state.Toggle("water");
         await _hubClient.PushHardwareStateAsync();
+        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.State);
         return Ok(new { component = "water", enabled = _state.State.IsWaterEnabled });
     }
 
@@ -692,7 +864,11 @@ public class SimulationController : ControllerBase
 ```
 
 ### `MVCS.Simulator/Program.cs`
+
+> **PENTING:** Simulator sekarang MVC+API hybrid. Gunakan `AddControllersWithViews()` (bukan hanya `AddControllers()`), dan map `SimulatorDashboardHub`.
+
 ```csharp
+using MVCS.Simulator.Hubs;
 using MVCS.Simulator.Services;
 using MVCS.Simulator.Workers;
 
@@ -701,8 +877,8 @@ var builder = WebApplication.CreateBuilder(args);
 // Configure Kestrel for HTTP on port 5100
 builder.WebHost.UseUrls("http://localhost:5100");
 
-// Add controllers + SignalR server
-builder.Services.AddControllers();
+// Add MVC + Controllers + SignalR server
+builder.Services.AddControllersWithViews();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSignalR();
 builder.Services.AddSwaggerGen(c =>
@@ -729,10 +905,258 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = "swagger";
 });
 
+app.UseStaticFiles();
+app.UseRouting();
+
+// MVC routing
+app.MapControllerRoute(
+    name: "default",
+    pattern: "{controller=HomeView}/{action=Index}/{id?}");
+
+// API controllers
 app.MapControllers();
-app.MapHub<MVCS.Simulator.Hubs.SimulatorHub>("/simulatorhub");
+
+// SignalR hubs
+app.MapHub<SimulatorHub>("/simulatorhub");
+app.MapHub<SimulatorDashboardHub>("/simulatordashboardhub");
 
 app.Run();
+```
+
+---
+
+## Langkah 5B: Simulator Dashboard UI (MVC Views)
+
+> **BARU:** Simulator sekarang punya web UI sendiri di `http://localhost:5100` dan dashboard di `/Dashboard`. Ini membutuhkan MVC controllers, Razor views, dan JavaScript.
+
+### `MVCS.Simulator/Controllers/HomeViewController.cs`
+```csharp
+using Microsoft.AspNetCore.Mvc;
+
+namespace MVCS.Simulator.Controllers;
+
+[Route("")]
+public class HomeViewController : Controller
+{
+    [HttpGet("")]
+    public IActionResult Index()
+    {
+        return View();
+    }
+}
+```
+
+### `MVCS.Simulator/Controllers/DashboardViewController.cs`
+```csharp
+using Microsoft.AspNetCore.Mvc;
+
+namespace MVCS.Simulator.Controllers;
+
+[Route("Dashboard")]
+public class DashboardViewController : Controller
+{
+    [HttpGet("")]
+    public IActionResult Index()
+    {
+        return View();
+    }
+}
+```
+
+### `MVCS.Simulator/Views/_ViewImports.cshtml`
+```cshtml
+@using MVCS.Simulator
+@using MVCS.Simulator.Controllers
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+```
+
+### `MVCS.Simulator/Views/_ViewStart.cshtml`
+```cshtml
+@{
+    Layout = "_Layout";
+}
+```
+
+### `MVCS.Simulator/Views/Shared/_Layout.cshtml`
+
+> **PENTING:** Sama seperti Server, gunakan `@@keyframes` (double `@`) untuk CSS animations di file `.cshtml`.
+
+```cshtml
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - MVCS Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: { 600: '#2563eb', 700: '#1d4ed8' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+        /* Toggle Switch */
+        .toggle-switch { position:relative; width:72px; height:36px; display:inline-block; }
+        .toggle-switch input { opacity:0; width:0; height:0; }
+        .toggle-slider { position:absolute; cursor:pointer; inset:0; background:#334155; border-radius:36px; transition:.3s; box-shadow: inset 0 2px 4px rgba(0,0,0,0.3); }
+        .toggle-slider:before { content:''; position:absolute; height:28px; width:28px; left:4px; bottom:4px; background:white; border-radius:50%; transition:.3s; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
+        input:checked + .toggle-slider { background:#22c55e; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2), 0 0 12px rgba(34,197,94,0.3); }
+        input:checked + .toggle-slider:before { transform:translateX(36px); }
+        /* Water wave animation */
+        @@keyframes wave { 0%,100%{transform:translateX(0) translateZ(0) scaleY(1)} 50%{transform:translateX(-25%) translateZ(0) scaleY(0.55)} }
+        .water-wave { animation: wave 3s ease-in-out infinite; }
+        .water-wave2 { animation: wave 7s ease-in-out infinite; animation-delay: -2s; }
+        /* Pulse ring */
+        @@keyframes pulseRing { 0%{transform:scale(0.8);opacity:1} 100%{transform:scale(2.2);opacity:0} }
+        .pulse-ring { animation: pulseRing 1.5s ease-out infinite; }
+        /* Card hover */
+        .card-hover { transition: transform 0.25s ease, box-shadow 0.25s ease; }
+        .card-hover:hover { transform: translateY(-4px); box-shadow: 0 12px 40px rgba(0,0,0,0.4); }
+        /* Glow text */
+        @@keyframes glowPulse { 0%,100%{text-shadow:0 0 8px currentColor} 50%{text-shadow:0 0 20px currentColor, 0 0 40px currentColor} }
+        .glow-text { animation: glowPulse 2s ease-in-out infinite; }
+        /* Brightness slider */
+        input[type=range] { -webkit-appearance:none; height:6px; border-radius:3px; background:#334155; outline:none; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:18px; height:18px; border-radius:50%; background:#3b82f6; cursor:pointer; box-shadow: 0 0 6px rgba(59,130,246,0.5); }
+        /* LED orb */
+        .led-orb { width:80px; height:80px; border-radius:50%; transition: all 0.5s ease; }
+        /* Spin animation for pump */
+        @@keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+        .pump-spin { animation: spin 1s linear infinite; }
+        /* Interval badge */
+        .interval-badge { font-variant-numeric: tabular-nums; }
+    </style>
+    @RenderSection("Styles", required: false)
+</head>
+<body class="bg-slate-900 text-slate-200 min-h-screen">
+    @RenderBody()
+
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>
+```
+
+### `MVCS.Simulator/Views/HomeView/Index.cshtml`
+
+Landing page untuk Simulator. Menampilkan info dan link ke Dashboard.
+
+```cshtml
+@{
+    ViewData["Title"] = "Home";
+}
+
+<div class="min-h-screen flex flex-col items-center justify-center px-4">
+    <div class="text-center max-w-2xl">
+        <div class="mb-8">
+            <h1 class="text-5xl font-bold text-white mb-2">🔧 MVCS <span class="text-orange-500">Simulator</span></h1>
+            <p class="text-slate-400 text-lg">Hardware Simulation Engine</p>
+        </div>
+        <p class="text-slate-300 text-xl mb-8">
+            Simulates marine vessel hardware components — compass, water tank, pump, and deck LED.
+            Control hardware state, set broadcast intervals, and monitor real-time data.
+        </p>
+        <div class="flex flex-col sm:flex-row gap-4 justify-center">
+            <a href="/Dashboard"
+               class="bg-orange-600 hover:bg-orange-700 text-white font-semibold py-3 px-8 rounded-lg transition-colors text-lg shadow-lg shadow-orange-500/20 hover:shadow-orange-500/40">
+                Open Simulator Dashboard
+            </a>
+            <a href="/swagger"
+               class="border border-slate-600 hover:border-slate-400 text-slate-300 hover:text-white font-semibold py-3 px-8 rounded-lg transition-colors text-lg">
+                API Docs
+            </a>
+        </div>
+        <div class="mt-16 grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
+                <div class="text-3xl mb-2">🧭</div>
+                <p class="text-slate-400 text-sm">Compass</p>
+                <p class="text-cyan-400 text-xs mt-1 font-mono">500ms</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
+                <div class="text-3xl mb-2">💧</div>
+                <p class="text-slate-400 text-sm">Water Tank</p>
+                <p class="text-blue-400 text-xs mt-1 font-mono">2000ms</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
+                <div class="text-3xl mb-2">⚙️</div>
+                <p class="text-slate-400 text-sm">Pump Control</p>
+                <p class="text-emerald-400 text-xs mt-1 font-mono">On/Off</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
+                <div class="text-3xl mb-2">💡</div>
+                <p class="text-slate-400 text-sm">Deck LED</p>
+                <p class="text-amber-400 text-xs mt-1 font-mono">RGB</p>
+            </div>
+        </div>
+        <div class="mt-8">
+            <div class="inline-flex items-center gap-2 bg-slate-800/60 rounded-lg px-4 py-2 border border-slate-700/50">
+                <div class="w-2 h-2 rounded-full bg-orange-400 animate-pulse"></div>
+                <span class="text-slate-400 text-sm">Port <span class="text-orange-400 font-mono font-bold">5100</span> · Simulator Mode</span>
+            </div>
+        </div>
+    </div>
+</div>
+```
+
+### `MVCS.Simulator/Views/DashboardView/Index.cshtml`
+
+Dashboard utama Simulator dengan 4 kartu: Compass (canvas gauge), Water Tank (animated), Pump (toggle + spin), LED (color picker + orb). Setiap kartu memiliki interval control (number input + Set button) dan hardware enable/disable overlay.
+
+> **File ini panjang (~228 baris).** Copy dari source project `MVCS.Simulator/Views/DashboardView/Index.cshtml`.
+
+**Fitur utama per kartu:**
+- **Compass Card**: Canvas gauge `#compassGauge`, heading text, interval input (100–10,000ms)
+- **Water Tank Card**: SVG wave animation, percentage display, status badge, interval input
+- **Pump Card**: Toggle switch, spin animation icon, status badge
+- **LED Card**: Toggle switch, color picker, brightness slider, LED orb with glow effects
+
+```cshtml
+@{
+    ViewData["Title"] = "Simulator Dashboard";
+}
+
+<!-- Lihat source project untuk isi lengkap: MVCS.Simulator/Views/DashboardView/Index.cshtml -->
+<!-- Struktur utama: -->
+<!-- NAVBAR → CONNECTION BAR → MAIN (4 CARDS GRID) → Scripts section -->
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    <script src="~/js/simulator-dashboard.js" asp-append-version="true"></script>
+}
+```
+
+### `MVCS.Simulator/wwwroot/js/simulator-dashboard.js`
+
+> **File ini panjang (~528 baris).** Berisi semua logic untuk dashboard simulator.
+
+**Fitur utama:**
+1. **SignalR Connection** ke `/simulatordashboardhub` — menerima real-time updates
+2. **Canvas Compass** — menggambar compass gauge dengan needle, cardinal marks, tick marks
+3. **Water Tank** — update level dan status via SignalR
+4. **Pump Control** — toggle via API `/api/hardware/pump`, broadcast ke Server
+5. **LED Control** — color picker + brightness via API `/api/hardware/led`, broadcast ke Server
+6. **Hardware Toggle** — enable/disable components via API `/api/simulation/toggle/{component}`
+7. **Interval Control** — set broadcast interval via API `/api/simulation/interval/{component}` dengan SweetAlert toast feedback
+
+```javascript
+// Copy dari source project: MVCS.Simulator/wwwroot/js/simulator-dashboard.js
+// Lihat file asli untuk implementasi lengkap.
+
+// Key functions:
+// - startConnection() — connect to SimulatorDashboardHub
+// - drawCompass(heading) — canvas compass gauge rendering
+// - togglePump() — POST /api/hardware/pump + broadcast
+// - toggleLed() / setLedColor() — POST /api/hardware/led + broadcast
+// - toggleHardware(component) — POST /api/simulation/toggle/{component}
+// - setIntervalMs(component, value) — POST /api/simulation/interval/{component}
 ```
 
 ---
@@ -2819,9 +3243,11 @@ dotnet run
 
 | URL | Keterangan |
 |-----|-----------|
-| http://localhost:5000 | Landing page |
+| http://localhost:5000 | Server landing page |
 | http://localhost:5000/Account/Login | Login (admin@mvcs.com / Admin123) |
-| http://localhost:5000/Dashboard | Real-time dashboard |
+| http://localhost:5000/Dashboard | Server real-time dashboard |
+| http://localhost:5100 | Simulator landing page |
+| http://localhost:5100/Dashboard | Simulator dashboard (hardware control) |
 | http://localhost:5100/swagger | Simulator Swagger UI |
 
 ---
@@ -2846,13 +3272,24 @@ Sensor Control/
 │   │   ├── SimulationStateService.cs
 │   │   └── SimulatorHubClient.cs
 │   ├── Hubs/
-│   │   └── SimulatorHub.cs
+│   │   ├── SimulatorHub.cs
+│   │   └── SimulatorDashboardHub.cs    ← BARU
 │   ├── Workers/
 │   │   ├── CompassBroadcaster.cs
 │   │   └── WaterBroadcaster.cs
-│   └── Controllers/
-│       ├── HardwareController.cs
-│       └── SimulationController.cs
+│   ├── Controllers/
+│   │   ├── HardwareController.cs
+│   │   ├── SimulationController.cs
+│   │   ├── HomeViewController.cs       ← BARU
+│   │   └── DashboardViewController.cs  ← BARU
+│   ├── Views/                          ← BARU
+│   │   ├── _ViewImports.cshtml
+│   │   ├── _ViewStart.cshtml
+│   │   ├── Shared/_Layout.cshtml
+│   │   ├── HomeView/Index.cshtml
+│   │   └── DashboardView/Index.cshtml
+│   └── wwwroot/                        ← BARU
+│       └── js/simulator-dashboard.js
 └── MVCS.Server/
     ├── MVCS.Server.csproj
     ├── Program.cs
@@ -2887,4 +3324,4 @@ Sensor Control/
         └── js/dashboard.js
 ```
 
-**Total: 29 file source code** (tidak termasuk migration files yang auto-generated).
+**Total: 40 file source code** (tidak termasuk migration files yang auto-generated).

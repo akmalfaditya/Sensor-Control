@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using MVCS.Shared.DTOs;
+using MVCS.Simulator.Hubs;
 using MVCS.Simulator.Services;
 
 namespace MVCS.Simulator.Controllers;
@@ -9,10 +11,16 @@ namespace MVCS.Simulator.Controllers;
 public class HardwareController : ControllerBase
 {
     private readonly SimulationStateService _state;
+    private readonly SimulatorHubClient _hubClient;
+    private readonly IHubContext<SimulatorDashboardHub> _dashboardHub;
 
-    public HardwareController(SimulationStateService state)
+    public HardwareController(SimulationStateService state,
+        SimulatorHubClient hubClient,
+        IHubContext<SimulatorDashboardHub> dashboardHub)
     {
         _state = state;
+        _hubClient = hubClient;
+        _dashboardHub = dashboardHub;
     }
 
     [HttpGet("compass")]
@@ -49,32 +57,48 @@ public class HardwareController : ControllerBase
     }
 
     [HttpPost("pump")]
-    public ActionResult<PumpStateDto> SetPump([FromBody] PumpStateDto dto)
+    public async Task<ActionResult<PumpStateDto>> SetPump([FromBody] PumpStateDto dto)
     {
         if (!_state.State.IsPumpEnabled)
             return ServiceUnavailable("Pump is disabled");
 
         _state.PumpIsOn = dto.IsOn;
-        return Ok(new PumpStateDto
+        var result = new PumpStateDto
         {
             IsOn = _state.PumpIsOn,
             Message = _state.PumpIsOn ? "Pump activated" : "Pump deactivated"
-        });
+        };
+
+        // Broadcast to Server via SignalR
+        await _hubClient.PushPumpStateAsync(result.IsOn, result.Message);
+
+        // Broadcast to local dashboard
+        await _dashboardHub.Clients.All.SendAsync("ReceivePumpState", result.IsOn, result.Message);
+
+        return Ok(result);
     }
 
     [HttpPost("led")]
-    public ActionResult<LedStateDto> SetLed([FromBody] LedStateDto dto)
+    public async Task<ActionResult<LedStateDto>> SetLed([FromBody] LedStateDto dto)
     {
         if (!_state.State.IsLedEnabled)
             return ServiceUnavailable("LED is disabled");
 
         _state.LedHexColor = dto.HexColor;
         _state.LedBrightness = dto.Brightness;
-        return Ok(new LedStateDto
+        var result = new LedStateDto
         {
             HexColor = _state.LedHexColor,
             Brightness = _state.LedBrightness
-        });
+        };
+
+        // Broadcast to Server via SignalR
+        await _hubClient.PushLedStateAsync(result.HexColor, result.Brightness);
+
+        // Broadcast to local dashboard
+        await _dashboardHub.Clients.All.SendAsync("ReceiveLedState", result.HexColor, result.Brightness);
+
+        return Ok(result);
     }
 
     private ObjectResult ServiceUnavailable(string message)

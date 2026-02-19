@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.SignalR;
+using MVCS.Simulator.Hubs;
 using MVCS.Simulator.Services;
 
 namespace MVCS.Simulator.Workers;
@@ -6,15 +8,18 @@ public class CompassBroadcaster : BackgroundService
 {
     private readonly SimulationStateService _state;
     private readonly SimulatorHubClient _hubClient;
+    private readonly IHubContext<SimulatorDashboardHub> _dashboardHub;
     private readonly ILogger<CompassBroadcaster> _logger;
     private readonly Random _random = new();
 
     public CompassBroadcaster(SimulationStateService state,
         SimulatorHubClient hubClient,
+        IHubContext<SimulatorDashboardHub> dashboardHub,
         ILogger<CompassBroadcaster> logger)
     {
         _state = state;
         _hubClient = hubClient;
+        _dashboardHub = dashboardHub;
         _logger = logger;
     }
 
@@ -31,10 +36,15 @@ public class CompassBroadcaster : BackgroundService
                 _state.CompassHeading = (_state.CompassHeading + drift + 360) % 360;
                 var cardinal = _state.GetCardinalDirection(_state.CompassHeading);
 
+                // Push to Server
                 await _hubClient.PushCompassAsync(_state.CompassHeading, cardinal);
+
+                // Push to local dashboard
+                await _dashboardHub.Clients.All.SendAsync("ReceiveCompass",
+                    _state.CompassHeading, cardinal, stoppingToken);
             }
 
-            await Task.Delay(500, stoppingToken);
+            await Task.Delay(_state.CompassIntervalMs, stoppingToken);
         }
     }
 }

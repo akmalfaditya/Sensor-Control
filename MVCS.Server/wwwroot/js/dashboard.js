@@ -60,9 +60,9 @@ connection.on("ReceiveWaterLevel", (level, status) => {
     percent.textContent = `${Math.round(level)}%`;
 
     const cfg = {
-        'HIGH':   { bg: 'bg-red-500/20',    text: 'text-red-400',    border: '' },
-        'NORMAL': { bg: 'bg-green-500/20',   text: 'text-green-400',  border: '' },
-        'LOW':    { bg: 'bg-yellow-500/20',  text: 'text-yellow-400', border: '' }
+        'HIGH': { bg: 'bg-red-500/20', text: 'text-red-400', border: '' },
+        'NORMAL': { bg: 'bg-green-500/20', text: 'text-green-400', border: '' },
+        'LOW': { bg: 'bg-yellow-500/20', text: 'text-yellow-400', border: '' }
     };
     const c = cfg[status] || cfg['NORMAL'];
     statusEl.className = `px-2.5 py-0.5 rounded-full text-xs font-bold ${c.bg} ${c.text} transition-all`;
@@ -78,7 +78,48 @@ connection.on("ReceivePumpState", (isOn, message) => {
 
 connection.on("ReceiveLedState", (hexColor, brightness) => {
     lastSimulatorUpdate = Date.now();
-    if (ledIsOn) updateLedVisual(hexColor, brightness);
+    const isOn = hexColor !== '#000000' && brightness > 0;
+    if (isOn) {
+        // Sync toggle and controls to ON
+        if (!ledIsOn) {
+            ledIsOn = true;
+            const toggle = document.getElementById('ledToggle');
+            if (toggle) toggle.checked = true;
+            const controls = document.getElementById('ledControls');
+            if (controls) {
+                controls.classList.remove('opacity-30', 'pointer-events-none');
+                controls.classList.add('opacity-100');
+            }
+            const badge = document.getElementById('ledBadge');
+            if (badge) {
+                badge.className = 'px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-400 transition-all';
+                badge.textContent = 'ON';
+            }
+        }
+        const picker = document.getElementById('ledColorPicker');
+        if (picker) picker.value = hexColor;
+        const slider = document.getElementById('ledBrightness');
+        if (slider) slider.value = brightness;
+        const bVal = document.getElementById('brightnessVal');
+        if (bVal) bVal.textContent = brightness + '%';
+        updateLedVisual(hexColor, brightness);
+    } else {
+        // Sync toggle and controls to OFF
+        ledIsOn = false;
+        const toggle = document.getElementById('ledToggle');
+        if (toggle) toggle.checked = false;
+        const controls = document.getElementById('ledControls');
+        if (controls) {
+            controls.classList.add('opacity-30', 'pointer-events-none');
+            controls.classList.remove('opacity-100');
+        }
+        const badge = document.getElementById('ledBadge');
+        if (badge) {
+            badge.className = 'px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-600/50 text-slate-400 transition-all';
+            badge.textContent = 'OFF';
+        }
+        updateLedVisual('#000000', 0);
+    }
 });
 
 connection.on("ReceiveHardwareState", (state) => {

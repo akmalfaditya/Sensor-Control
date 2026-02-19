@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.SignalR;
+using MVCS.Simulator.Hubs;
 using MVCS.Simulator.Services;
 
 namespace MVCS.Simulator.Workers;
@@ -6,15 +8,18 @@ public class WaterBroadcaster : BackgroundService
 {
     private readonly SimulationStateService _state;
     private readonly SimulatorHubClient _hubClient;
+    private readonly IHubContext<SimulatorDashboardHub> _dashboardHub;
     private readonly ILogger<WaterBroadcaster> _logger;
     private readonly Random _random = new();
 
     public WaterBroadcaster(SimulationStateService state,
         SimulatorHubClient hubClient,
+        IHubContext<SimulatorDashboardHub> dashboardHub,
         ILogger<WaterBroadcaster> logger)
     {
         _state = state;
         _hubClient = hubClient;
+        _dashboardHub = dashboardHub;
         _logger = logger;
     }
 
@@ -61,10 +66,17 @@ public class WaterBroadcaster : BackgroundService
                     _ => "LOW"
                 };
 
-                await _hubClient.PushWaterLevelAsync(Math.Round(_state.WaterLevel, 1), status);
+                var level = Math.Round(_state.WaterLevel, 1);
+
+                // Push to Server
+                await _hubClient.PushWaterLevelAsync(level, status);
+
+                // Push to local dashboard
+                await _dashboardHub.Clients.All.SendAsync("ReceiveWaterLevel",
+                    level, status, stoppingToken);
             }
 
-            await Task.Delay(2000, stoppingToken);
+            await Task.Delay(_state.WaterIntervalMs, stoppingToken);
         }
     }
 }

@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using MVCS.Shared.DTOs;
+using MVCS.Simulator.Hubs;
 using MVCS.Simulator.Services;
 
 namespace MVCS.Simulator.Controllers;
@@ -10,11 +12,15 @@ public class SimulationController : ControllerBase
 {
     private readonly SimulationStateService _state;
     private readonly SimulatorHubClient _hubClient;
+    private readonly IHubContext<SimulatorDashboardHub> _dashboardHub;
 
-    public SimulationController(SimulationStateService state, SimulatorHubClient hubClient)
+    public SimulationController(SimulationStateService state,
+        SimulatorHubClient hubClient,
+        IHubContext<SimulatorDashboardHub> dashboardHub)
     {
         _state = state;
         _hubClient = hubClient;
+        _dashboardHub = dashboardHub;
     }
 
     [HttpGet("state")]
@@ -28,6 +34,7 @@ public class SimulationController : ControllerBase
     {
         _state.Toggle("compass");
         await _hubClient.PushHardwareStateAsync();
+        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.State);
         return Ok(new { component = "compass", enabled = _state.State.IsCompassEnabled });
     }
 
@@ -36,6 +43,7 @@ public class SimulationController : ControllerBase
     {
         _state.Toggle("water");
         await _hubClient.PushHardwareStateAsync();
+        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.State);
         return Ok(new { component = "water", enabled = _state.State.IsWaterEnabled });
     }
 
@@ -44,6 +52,7 @@ public class SimulationController : ControllerBase
     {
         _state.Toggle("pump");
         await _hubClient.PushHardwareStateAsync();
+        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.State);
         return Ok(new { component = "pump", enabled = _state.State.IsPumpEnabled });
     }
 
@@ -52,6 +61,27 @@ public class SimulationController : ControllerBase
     {
         _state.Toggle("led");
         await _hubClient.PushHardwareStateAsync();
+        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.State);
         return Ok(new { component = "led", enabled = _state.State.IsLedEnabled });
+    }
+
+    [HttpPost("interval/{component}")]
+    public async Task<IActionResult> SetInterval(string component, [FromBody] IntervalRequest request)
+    {
+        _state.SetInterval(component, request.IntervalMs);
+        await _hubClient.PushHardwareStateAsync();
+        await _dashboardHub.Clients.All.SendAsync("ReceiveHardwareState", _state.State);
+        return Ok(new
+        {
+            component,
+            intervalMs = component.ToLower() == "compass"
+                ? _state.CompassIntervalMs
+                : _state.WaterIntervalMs
+        });
+    }
+
+    public class IntervalRequest
+    {
+        public int IntervalMs { get; set; }
     }
 }

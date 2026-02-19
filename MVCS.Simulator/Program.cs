@@ -1,3 +1,4 @@
+using MVCS.Simulator.Hubs;
 using MVCS.Simulator.Services;
 using MVCS.Simulator.Workers;
 
@@ -6,8 +7,8 @@ var builder = WebApplication.CreateBuilder(args);
 // Configure Kestrel for HTTP on port 5100
 builder.WebHost.UseUrls("http://localhost:5100");
 
-// Add controllers + SignalR server
-builder.Services.AddControllers();
+// Add MVC + Controllers + SignalR server
+builder.Services.AddControllersWithViews();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSignalR();
 builder.Services.AddSwaggerGen(c =>
@@ -34,7 +35,19 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = "swagger";
 });
 
+app.UseStaticFiles();
+app.UseRouting();
+
+// MVC routing
+app.MapControllerRoute(
+    name: "default",
+    pattern: "{controller=HomeView}/{action=Index}/{id?}");
+
+// API controllers
 app.MapControllers();
-app.MapHub<MVCS.Simulator.Hubs.SimulatorHub>("/simulatorhub");
+
+// SignalR hubs
+app.MapHub<SimulatorHub>("/simulatorhub");
+app.MapHub<SimulatorDashboardHub>("/simulatordashboardhub");
 
 app.Run();

@@ -1,0 +1,227 @@
+@{
+    ViewData["Title"] = "Simulator Dashboard";
+}
+
+<!-- NAVBAR -->
+<nav class="bg-slate-800/90 backdrop-blur-md border-b border-slate-700/50 px-6 py-3 sticky top-0 z-40">
+    <div class="flex items-center justify-between max-w-7xl mx-auto">
+        <div class="flex items-center space-x-4">
+            <a href="/" class="text-xl font-bold text-white tracking-tight hover:opacity-80 transition-opacity">🔧 MVCS <span class="text-orange-400">Simulator</span></a>
+            <div class="hidden sm:block h-6 w-px bg-slate-600"></div>
+            <span id="serverBadge" class="px-3 py-1 rounded-full text-xs font-semibold bg-slate-700 text-slate-400 transition-all duration-300">
+                Checking...
+            </span>
+        </div>
+        <div class="flex items-center space-x-3">
+            <div id="clockDisplay" class="text-slate-400 text-sm font-mono bg-slate-800/60 rounded-lg px-3 py-2 border border-slate-700/50"></div>
+        </div>
+    </div>
+</nav>
+
+<!-- CONNECTION STATUS BAR -->
+<div id="connectionBar" class="h-1 bg-red-500 transition-all duration-500 shadow-sm"></div>
+
+<!-- MAIN CONTENT -->
+<main class="max-w-7xl mx-auto p-6">
+    <!-- Section Header -->
+    <div class="mb-6 flex items-center justify-between">
+        <div>
+            <h2 class="text-2xl font-bold text-white">Simulator Dashboard</h2>
+            <p class="text-slate-400 text-sm mt-1">Control hardware simulation & broadcast intervals</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <span class="text-slate-500 text-xs">Port 5100</span>
+            <div class="w-2 h-2 rounded-full bg-orange-400 animate-pulse"></div>
+        </div>
+    </div>
+
+    <!-- 4 CARDS GRID -->
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+
+        <!-- CARD 1: COMPASS -->
+        <div id="compassCard" class="card-hover bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl border border-slate-700/50 shadow-xl overflow-hidden relative">
+            <!-- Disabled Overlay -->
+            <div id="compassOverlay" class="absolute inset-0 bg-slate-900/70 backdrop-blur-[2px] z-20 hidden flex-col items-center justify-center">
+                <svg class="w-10 h-10 text-red-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                <span class="text-red-400 font-bold text-sm">HARDWARE DISABLED</span>
+                <button onclick="toggleHardware('compass')" class="mt-3 px-4 py-1.5 rounded-lg bg-green-600/80 hover:bg-green-600 text-white text-xs font-bold transition-all hover:shadow-lg hover:shadow-green-500/20">Enable</button>
+            </div>
+            <div class="px-5 py-3 border-b border-slate-700/50 flex items-center justify-between">
+                <h3 class="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-cyan-400 inline-block"></span>
+                    Compass Heading
+                </h3>
+                <div class="flex items-center gap-2">
+                    <button id="compassHwBadge" onclick="toggleHardware('compass')" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-500/15 text-green-400 border border-green-500/30 transition-all duration-300 cursor-pointer hover:scale-105">HW ON</button>
+                    <span id="compassLive" class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
+                </div>
+            </div>
+            <div class="p-5 flex flex-col items-center justify-center" style="min-height: 220px;">
+                <canvas id="compassGauge" width="180" height="180"></canvas>
+            </div>
+            <div class="px-5 py-3 border-t border-slate-700/50 relative z-30 bg-gradient-to-br from-slate-800 to-slate-800/80">
+                <div class="flex items-center justify-between mb-2">
+                    <span id="compassText" class="text-lg font-mono font-bold text-cyan-400 glow-text">N 0°</span>
+                </div>
+                <!-- Interval Control -->
+                <div class="flex items-center gap-2 mt-1">
+                    <span class="text-slate-500 text-[10px] uppercase tracking-wider">Interval</span>
+                    <input type="number" id="compassInterval" min="100" max="10000" step="100" value="500"
+                           onkeydown="if(event.key==='Enter') setSimInterval('compass', this.value)"
+                           class="w-20 bg-slate-700/80 border border-slate-600 rounded-md px-2 py-1 text-cyan-400 text-xs font-mono text-center focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30" />
+                    <span class="text-slate-500 text-[10px]">ms</span>
+                    <button onclick="setSimInterval('compass', document.getElementById('compassInterval').value)"
+                            class="px-2.5 py-1 rounded-md bg-cyan-600/20 hover:bg-cyan-600/40 text-cyan-400 text-[10px] font-bold border border-cyan-500/30 transition-all hover:scale-105">Set</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- CARD 2: WATER TANK -->
+        <div id="waterCard" class="card-hover bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl border border-slate-700/50 shadow-xl overflow-hidden relative">
+            <!-- Disabled Overlay -->
+            <div id="waterOverlay" class="absolute inset-0 bg-slate-900/70 backdrop-blur-[2px] z-20 hidden flex-col items-center justify-center">
+                <svg class="w-10 h-10 text-red-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                <span class="text-red-400 font-bold text-sm">HARDWARE DISABLED</span>
+                <button onclick="toggleHardware('water')" class="mt-3 px-4 py-1.5 rounded-lg bg-green-600/80 hover:bg-green-600 text-white text-xs font-bold transition-all hover:shadow-lg hover:shadow-green-500/20">Enable</button>
+            </div>
+            <div class="px-5 py-3 border-b border-slate-700/50 flex items-center justify-between">
+                <h3 class="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-blue-400 inline-block"></span>
+                    Water Level
+                </h3>
+                <div class="flex items-center gap-2">
+                    <button id="waterHwBadge" onclick="toggleHardware('water')" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-500/15 text-green-400 border border-green-500/30 transition-all duration-300 cursor-pointer hover:scale-105">HW ON</button>
+                    <span id="waterStatus" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-green-500/20 text-green-400 transition-all">NORMAL</span>
+                </div>
+            </div>
+            <div class="p-5 flex flex-col items-center justify-center" style="min-height: 220px;">
+                <div class="relative w-28 rounded-xl overflow-hidden border-2 border-slate-600/50" style="height: 170px; background: linear-gradient(to bottom, #0f172a, #1e293b);">
+                    <!-- Wave layers -->
+                    <div id="waterFill" class="absolute bottom-0 w-full transition-all duration-1000 ease-out" style="height: 50%;">
+                        <svg class="water-wave absolute top-0 left-0 w-[200%]" viewBox="0 0 400 20" style="margin-top:-8px">
+                            <path d="M0,10 C100,0 200,20 400,10 L400,20 L0,20 Z" fill="rgba(59,130,246,0.6)"/>
+                        </svg>
+                        <svg class="water-wave2 absolute top-0 left-0 w-[200%]" viewBox="0 0 400 20" style="margin-top:-4px">
+                            <path d="M0,10 C80,20 160,0 240,10 C320,20 400,0 400,10 L400,20 L0,20 Z" fill="rgba(59,130,246,0.3)"/>
+                        </svg>
+                        <div class="absolute inset-0 bg-blue-500/40" style="margin-top:10px"></div>
+                    </div>
+                    <div class="absolute inset-0 flex items-center justify-center z-10">
+                        <span id="waterPercent" class="text-white font-bold text-2xl drop-shadow-lg">50%</span>
+                    </div>
+                    <!-- Level markers -->
+                    <div class="absolute right-1 top-[10%] text-slate-500 text-[9px] font-mono">90</div>
+                    <div class="absolute right-1 top-[30%] text-slate-500 text-[9px] font-mono">70</div>
+                    <div class="absolute right-1 top-[50%] text-slate-500 text-[9px] font-mono">50</div>
+                    <div class="absolute right-1 top-[70%] text-slate-500 text-[9px] font-mono">30</div>
+                    <div class="absolute right-1 top-[90%] text-slate-500 text-[9px] font-mono">10</div>
+                </div>
+            </div>
+            <div class="px-5 py-3 border-t border-slate-700/50 relative z-30 bg-gradient-to-br from-slate-800 to-slate-800/80">
+                <!-- Interval Control -->
+                <div class="flex items-center gap-2">
+                    <span class="text-slate-500 text-[10px] uppercase tracking-wider">Interval</span>
+                    <input type="number" id="waterInterval" min="100" max="10000" step="100" value="2000"
+                           onkeydown="if(event.key==='Enter') setSimInterval('water', this.value)"
+                           class="w-20 bg-slate-700/80 border border-slate-600 rounded-md px-2 py-1 text-blue-400 text-xs font-mono text-center focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30" />
+                    <span class="text-slate-500 text-[10px]">ms</span>
+                    <button onclick="setSimInterval('water', document.getElementById('waterInterval').value)"
+                            class="px-2.5 py-1 rounded-md bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 text-[10px] font-bold border border-blue-500/30 transition-all hover:scale-105">Set</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- CARD 3: PUMP CONTROL -->
+        <div id="pumpCard" class="card-hover bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl border border-slate-700/50 shadow-xl overflow-hidden relative">
+            <!-- Disabled Overlay -->
+            <div id="pumpOverlay" class="absolute inset-0 bg-slate-900/70 backdrop-blur-[2px] z-20 hidden flex-col items-center justify-center">
+                <svg class="w-10 h-10 text-red-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                <span class="text-red-400 font-bold text-sm">HARDWARE DISABLED</span>
+                <button onclick="toggleHardware('pump')" class="mt-3 px-4 py-1.5 rounded-lg bg-green-600/80 hover:bg-green-600 text-white text-xs font-bold transition-all hover:shadow-lg hover:shadow-green-500/20">Enable</button>
+            </div>
+            <div class="px-5 py-3 border-b border-slate-700/50 flex items-center justify-between">
+                <h3 class="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
+                    Main Pump
+                </h3>
+                <div class="flex items-center gap-2">
+                    <button id="pumpHwBadge" onclick="toggleHardware('pump')" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-500/15 text-green-400 border border-green-500/30 transition-all duration-300 cursor-pointer hover:scale-105">HW ON</button>
+                    <span id="pumpBadge" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-600/50 text-slate-400 transition-all">OFF</span>
+                </div>
+            </div>
+            <div class="p-5 flex flex-col items-center justify-center" style="min-height: 220px;">
+                <!-- Pump icon with spin animation -->
+                <div class="relative mb-4">
+                    <div id="pumpRing" class="absolute inset-0 rounded-full border-2 border-transparent"></div>
+                    <div id="pumpIcon" class="w-16 h-16 rounded-full bg-slate-700 flex items-center justify-center text-3xl transition-all duration-300">
+                        ⚙️
+                    </div>
+                </div>
+                <label class="toggle-switch mb-3">
+                    <input type="checkbox" id="pumpToggle" onchange="togglePump()" />
+                    <span class="toggle-slider"></span>
+                </label>
+                <p id="pumpStatus" class="text-slate-500 text-sm font-medium">Idle</p>
+            </div>
+            <div class="px-5 py-3 border-t border-slate-700/50 text-center relative z-30 bg-gradient-to-br from-slate-800 to-slate-800/80">
+                <p class="text-slate-500 text-xs">Pump drains water 2x faster when ON</p>
+            </div>
+        </div>
+
+        <!-- CARD 4: DECK LED -->
+        <div id="ledCard" class="card-hover bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl border border-slate-700/50 shadow-xl overflow-hidden relative">
+            <!-- Disabled Overlay -->
+            <div id="ledOverlay" class="absolute inset-0 bg-slate-900/70 backdrop-blur-[2px] z-20 hidden flex-col items-center justify-center">
+                <svg class="w-10 h-10 text-red-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                <span class="text-red-400 font-bold text-sm">HARDWARE DISABLED</span>
+                <button onclick="toggleHardware('led')" class="mt-3 px-4 py-1.5 rounded-lg bg-green-600/80 hover:bg-green-600 text-white text-xs font-bold transition-all hover:shadow-lg hover:shadow-green-500/20">Enable</button>
+            </div>
+            <div class="px-5 py-3 border-b border-slate-700/50 flex items-center justify-between">
+                <h3 class="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <span id="ledDot" class="w-2 h-2 rounded-full bg-slate-500 inline-block transition-all duration-300"></span>
+                    Deck LED
+                </h3>
+                <div class="flex items-center gap-2">
+                    <button id="ledHwBadge" onclick="toggleHardware('led')" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-500/15 text-green-400 border border-green-500/30 transition-all duration-300 cursor-pointer hover:scale-105">HW ON</button>
+                    <span id="ledBadge" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-600/50 text-slate-400 transition-all">OFF</span>
+                </div>
+            </div>
+            <div class="p-5 flex flex-col items-center justify-center" style="min-height: 220px;">
+                <!-- LED Orb Preview -->
+                <div class="relative mb-4">
+                    <div id="ledOrb" class="led-orb bg-slate-700 border-2 border-slate-600 flex items-center justify-center">
+                        <span class="text-3xl">💡</span>
+                    </div>
+                    <div id="ledPulse" class="absolute inset-0 rounded-full border-2 border-transparent"></div>
+                </div>
+                <!-- LED Toggle -->
+                <label class="toggle-switch mb-3">
+                    <input type="checkbox" id="ledToggle" onchange="toggleLed()" />
+                    <span class="toggle-slider"></span>
+                </label>
+                <!-- Color & Brightness controls -->
+                <div id="ledControls" class="w-full space-y-3 opacity-30 pointer-events-none transition-all duration-300">
+                    <input type="color" id="ledColorPicker" value="#3b82f6"
+                           onchange="setLedColor(this.value)"
+                           class="w-full h-10 rounded-lg border border-slate-600 cursor-pointer bg-transparent" />
+                    <div class="flex items-center gap-2">
+                        <svg class="w-4 h-4 text-slate-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6z"/></svg>
+                        <input type="range" id="ledBrightness" min="0" max="100" value="100"
+                               oninput="document.getElementById('brightnessVal').textContent=this.value+'%'; setLedColor(document.getElementById('ledColorPicker').value)"
+                               class="flex-1" />
+                        <span id="brightnessVal" class="text-slate-400 text-xs w-10 text-right font-mono">100%</span>
+                    </div>
+                </div>
+            </div>
+            <div class="px-5 py-3 border-t border-slate-700/50 flex items-center justify-between relative z-30 bg-gradient-to-br from-slate-800 to-slate-800/80">
+                <p id="ledHexText" class="text-slate-500 text-xs font-mono">#000000</p>
+            </div>
+        </div>
+
+    </div>
+</main>
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    <script src="~/js/simulator-dashboard.js" asp-append-version="true"></script>
+}
